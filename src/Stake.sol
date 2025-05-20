@@ -12,6 +12,7 @@ contract Stake is Ownable {
 
     // Events
     event Staked(address sender, uint256 amount, uint256 id);
+    event RewardsClaimed(address sender, uint256 amount);
 
     // Structs
     struct StakeInfo {
@@ -22,7 +23,7 @@ contract Stake is Ownable {
 
     // State variables
     IERC20 public immutable TOKEN; 
-    uint256 public BASE_REWARD_RATE = 10; // 10%
+    uint256 public BASE_REWARD_RATE = 10e17; // 10%
     uint256 public currentId; 
     uint256 public constant SECONDS_IN_YEAR = 365 days;
     uint256 public constant SCALING_FACTOR  = 1e18; 
@@ -44,6 +45,7 @@ contract Stake is Ownable {
 
         StakeInfo memory user_stake = StakeInfo(_amount, block.timestamp, currentId);
         stakes[msg.sender].push(user_stake);
+        currentId++;
         emit Staked(msg.sender, _amount, currentId);
     }
 
@@ -56,17 +58,21 @@ contract Stake is Ownable {
             
             uint256 timeElpased = block.timestamp - info.startedTime;
             uint256 reward = calculateRewards(info.amount, timeElpased);
+
+            stakes[msg.sender][i].startedTime = block.timestamp;
             totalRewardsForUser += reward;
         }
 
         if(totalRewardsForUser == 0) {
             revert NotEnoughValue();
         }
+        
         bool success = TOKEN.transfer(msg.sender, totalRewardsForUser);
         if(!success) {
             revert TransferFailed();
         }
 
+        emit RewardsClaimed(msg.sender, totalRewardsForUser);
     }
 
     function setBaseRewardRate(uint256 _newRate) public onlyOwner {
@@ -77,10 +83,16 @@ contract Stake is Ownable {
         return TOKEN.balanceOf(address(this));
     }
 
+    function userStake(address _user) public view returns(uint256 totalRewardsForUser) {
+        for(uint i = 0; i < stakes[_user].length; i++){
+            totalRewardsForUser += stakes[_user][i].amount; 
+        }
+    }
+
     // Internal and Private functions
-    function calculateRewards(uint256 _amount, uint256 timeElapsed) internal view returns (uint256) {
+    function calculateRewards(uint256 _amount, uint256 timeElapsed) public view returns (uint256) {
         // (_amount * 0.10 * timeElapsed) / (1 year)
         return (_amount * BASE_REWARD_RATE * timeElapsed) / (SECONDS_IN_YEAR * SCALING_FACTOR);
-    }
+    } 
 
 }
