@@ -3,12 +3,13 @@ pragma solidity 0.8.20;
 
 import { IERC20 } from "openzeppelin-contracts/contracts/token/ERC20/ERC20.sol";
 import { Ownable } from "openzeppelin-contracts/contracts/access/Ownable.sol";
+import { ReentrancyGuard } from "openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 
 // Errors
 error TransferFailed();
 error NotEnoughValue();
 
-contract Stake is Ownable {
+contract ERC20Staking is Ownable, ReentrancyGuard{
 
     // Events
     event Staked(address sender, uint256 amount, uint256 id);
@@ -24,7 +25,7 @@ contract Stake is Ownable {
 
     // State variables
     IERC20 public immutable TOKEN; 
-    uint256 public BASE_REWARD_RATE = 10e16; // 10%
+    uint256 public REWARD_RATE_PER_YEAR = 10e16; // 10%
     uint256 public currentId; 
     uint256 public constant SECONDS_IN_YEAR = 365 days;
     uint256 public constant SCALING_FACTOR  = 1e18; 
@@ -37,7 +38,7 @@ contract Stake is Ownable {
     }
 
     // Public and External functions
-    function stake(uint256 _amount) public {
+    function deposit(uint256 _amount) public {
         bool success = TOKEN.transferFrom(msg.sender, address(this), _amount);
         
         if(!success) {
@@ -46,22 +47,23 @@ contract Stake is Ownable {
 
         StakeInfo memory user_stake = StakeInfo(_amount, block.timestamp, currentId);
         stakes[msg.sender].push(user_stake);
-        currentId++;
         
         emit Staked(msg.sender, _amount, currentId);
+        currentId++;
     }
 
-    function claimRewards() public {
-        StakeInfo[] memory user_stakes = stakes[msg.sender];
+    function claimRewards() public nonReentrant {
+        StakeInfo[] storage user_stakes = stakes[msg.sender];
         uint256 totalRewardsForUser = 0;
-        for(uint i = 0; i < user_stakes.length; i++){
+        uint256 user_stakes_length = user_stakes.length;
+        for(uint i = 0; i < user_stakes_length; i++){
             StakeInfo memory info = user_stakes[i];
             if(info.amount == 0) continue;
             
             uint256 timeElpased = block.timestamp - info.startedTime;
             uint256 reward = calculateRewards(info.amount, timeElpased);
 
-            stakes[msg.sender][i].startedTime = block.timestamp;
+            user_stakes[i].startedTime = block.timestamp;
             totalRewardsForUser += reward;
         }
 
@@ -77,11 +79,13 @@ contract Stake is Ownable {
         emit RewardsClaimed(msg.sender, totalRewardsForUser);
     }
 
-    function withdraw(uint256 _amountToWithdraw) public {
+    function withdraw(uint256 _amountToWithdraw) public nonReentrant {
+        if(getUserTotalStaked(msg.sender) < _amountToWithdraw) {
+            revert NotEnoughValue();
+        }
 
-        claimRewards();
         uint256 total = 0;
-        StakeInfo[] memory user_stakes = stakes[msg.sender];
+        StakeInfo[] storage user_stakes = stakes[msg.sender];
         uint i = 0;
         while(total < _amountToWithdraw) {
             StakeInfo memory info = user_stakes[i];
@@ -91,11 +95,11 @@ contract Stake is Ownable {
             }
             if((total + info.amount) > _amountToWithdraw) {
                 uint256 difference = _amountToWithdraw - total;
-                stakes[msg.sender][i].amount -= difference;
+                user_stakes[i].amount -= difference;
                 total += difference;
             } else {
                 total += info.amount;
-                stakes[msg.sender][i].amount = 0;
+                user_stakes[i].amount = 0;
             }
             i++;
             
@@ -110,24 +114,24 @@ contract Stake is Ownable {
 
     }
 
-    function setBaseRewardRate(uint256 _newRate) public onlyOwner {
-        BASE_REWARD_RATE = _newRate;
+    function setRewardRatePerYear(uint256 _newRate) public onlyOwner {
+        REWARD_RATE_PER_YEAR = _newRate;
     }
 
     function rewardPool() public view returns(uint256) {
         return TOKEN.balanceOf(address(this));
     }
 
-    function userStake(address _user) public view returns(uint256 totalRewardsForUser) {
+    function getUserTotalStaked(address _user) public view returns(uint256 totalStaked) {
         for(uint i = 0; i < stakes[_user].length; i++){
-            totalRewardsForUser += stakes[_user][i].amount; 
+            totalStaked += stakes[_user][i].amount; 
         }
     }
 
     // Internal and Private functions
-    function calculateRewards(uint256 _amount, uint256 timeElapsed) public view returns (uint256) {
+    function calculateRewards(uint256 _amount, uint256 timeElapsed) internal view returns (uint256) {
         // (_amount * 0.10 * timeElapsed) / (1 year)
-        return (_amount * BASE_REWARD_RATE * timeElapsed) / (SECONDS_IN_YEAR * SCALING_FACTOR);
+        return (_amount * REWARD_RATE_PER_YEAR * timeElapsed) / (SECONDS_IN_YEAR * SCALING_FACTOR);
     } 
 
 }
