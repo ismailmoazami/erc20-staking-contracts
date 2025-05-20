@@ -13,6 +13,7 @@ contract Stake is Ownable {
     // Events
     event Staked(address sender, uint256 amount, uint256 id);
     event RewardsClaimed(address sender, uint256 amount);
+    event TokensWithdrawn(address sender, uint256 amount);
 
     // Structs
     struct StakeInfo {
@@ -23,7 +24,7 @@ contract Stake is Ownable {
 
     // State variables
     IERC20 public immutable TOKEN; 
-    uint256 public BASE_REWARD_RATE = 10e17; // 10%
+    uint256 public BASE_REWARD_RATE = 10e16; // 10%
     uint256 public currentId; 
     uint256 public constant SECONDS_IN_YEAR = 365 days;
     uint256 public constant SCALING_FACTOR  = 1e18; 
@@ -46,6 +47,7 @@ contract Stake is Ownable {
         StakeInfo memory user_stake = StakeInfo(_amount, block.timestamp, currentId);
         stakes[msg.sender].push(user_stake);
         currentId++;
+        
         emit Staked(msg.sender, _amount, currentId);
     }
 
@@ -73,6 +75,39 @@ contract Stake is Ownable {
         }
 
         emit RewardsClaimed(msg.sender, totalRewardsForUser);
+    }
+
+    function withdraw(uint256 _amountToWithdraw) public {
+
+        claimRewards();
+        uint256 total = 0;
+        StakeInfo[] memory user_stakes = stakes[msg.sender];
+        uint i = 0;
+        while(total < _amountToWithdraw) {
+            StakeInfo memory info = user_stakes[i];
+            if(info.amount == 0) {
+                i++;
+                continue;
+            }
+            if((total + info.amount) > _amountToWithdraw) {
+                uint256 difference = _amountToWithdraw - total;
+                stakes[msg.sender][i].amount -= difference;
+                total += difference;
+            } else {
+                total += info.amount;
+                stakes[msg.sender][i].amount = 0;
+            }
+            i++;
+            
+        }
+
+        bool success = TOKEN.transfer(msg.sender, total);
+        if(!success) {
+            revert TransferFailed();
+        }
+
+        emit TokensWithdrawn(msg.sender, total);
+
     }
 
     function setBaseRewardRate(uint256 _newRate) public onlyOwner {

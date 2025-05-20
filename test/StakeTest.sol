@@ -21,9 +21,11 @@ contract StakeTest is Test {
         stake = new Stake(address(token));
 
         // minting some tokens
-        uint256 amount = 200e18; 
+        uint256 amount = 500e18; 
         token.mint(user1, amount);
         token.mint(user2, amount);
+        // minting tokens for stake contract for rewards
+        token.mint(address(stake), amount);
     }
 
     function test_stake() external {
@@ -82,10 +84,78 @@ contract StakeTest is Test {
         stake.claimRewards();
         
         uint256 userBalanceAfterClaimingRewards = token.balanceOf(user1);
-        uint256 expectedReward = 273972602739726027;
+        uint256 expectedReward = 27397260273972602;
         vm.stopPrank();
 
         assert((userBalanceAfterClaimingRewards - userBalanceAfterStaking) == expectedReward);
+
+    }
+
+    function test_can_withdraw() external {
+        vm.startPrank(user1);
+        
+        token.approve(address(stake), STAKE_AMOUNT);
+        
+        stake.stake(STAKE_AMOUNT);
+        
+        vm.warp(TEN_DAYS_IN_SECOND);
+        stake.withdraw(STAKE_AMOUNT);
+
+        uint256 userStakedBalanceAfterWithdraw = stake.userStake(user1);
+
+        vm.stopPrank();
+        uint256 expected = 0;
+        assert(userStakedBalanceAfterWithdraw == expected);
+
+    }
+
+    function test_can_withdraw_partially() external {
+        vm.startPrank(user1);
+        
+        token.approve(address(stake), STAKE_AMOUNT);
+        
+        stake.stake(STAKE_AMOUNT);
+
+        vm.warp(TEN_DAYS_IN_SECOND);
+        uint256 amountToWithdraw = STAKE_AMOUNT - 1e18;
+        stake.withdraw(amountToWithdraw);
+
+        uint256 userStakedBalanceAfterWithdraw = stake.userStake(user1);
+        uint256 expected = 1e18;
+
+        assert(userStakedBalanceAfterWithdraw == expected);
+
+    }
+
+    function test_can_withdraw_multiple_stakes() external {
+        vm.startPrank(user1);
+        
+        token.approve(address(stake), STAKE_AMOUNT * 20);
+        
+        stake.stake(STAKE_AMOUNT);
+        stake.stake(STAKE_AMOUNT * 2);
+        stake.stake(STAKE_AMOUNT * 3);
+        
+        vm.warp(TEN_DAYS_IN_SECOND);
+        uint256 amountToWithdraw = STAKE_AMOUNT * 6;
+        stake.withdraw(amountToWithdraw);
+
+        uint256 userStakedBalanceAfterWithdraw = stake.userStake(user1);
+        uint256 expected = 0;
+        assert(userStakedBalanceAfterWithdraw == expected);
+
+        // Testing partiall withdraw with multiple stakes
+        stake.stake(STAKE_AMOUNT);
+        stake.stake(STAKE_AMOUNT * 2);
+        stake.stake(STAKE_AMOUNT * 2);
+
+        vm.warp(TEN_DAYS_IN_SECOND * 2);
+        amountToWithdraw = STAKE_AMOUNT * 3;
+        stake.withdraw(amountToWithdraw);
+
+        expected = STAKE_AMOUNT * 2;
+        userStakedBalanceAfterWithdraw = stake.userStake(user1);
+        assert(expected == userStakedBalanceAfterWithdraw);
 
     }
     
